@@ -12,7 +12,7 @@ entity uart_rx is
 end uart_rx;
 
 architecture Behavioral of uart_rx is
-    constant CLOCK_FREQ      : integer := 100_000_000;  -- Basys 3 clock
+    constant CLOCK_FREQ      : integer := 100000000;  -- Basys 3 clock
     constant BAUD_RATE       : integer := 115200;
     constant BAUD_TICK_COUNT : integer := CLOCK_FREQ / BAUD_RATE;  -- ≈868
 
@@ -45,13 +45,18 @@ begin
 
                         when START =>
                         if baud_count = BAUD_TICK_COUNT / 2 then
-                            baud_count <= 0;
-                            bit_index <= 0;
-                            state <= DATA;
+                            if rx = '0' then  -- Confirm it's still a start bit
+                                baud_count <= 0;
+                                bit_index <= 0;
+                                state <= DATA;
+                            else
+                                -- False start, go back to IDLE
+                                state <= IDLE;
+                            end if;
                         else
                             baud_count <= baud_count + 1;
-                        end if;                    
-
+                        end if;
+                    
                     when DATA =>
                         if baud_count = BAUD_TICK_COUNT then
                             baud_count <= 0;
