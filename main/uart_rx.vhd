@@ -43,14 +43,14 @@ begin
                             baud_count <= 0;
                         end if;
 
-                    when START =>
+                        when START =>
                         if baud_count = BAUD_TICK_COUNT / 2 then
                             baud_count <= 0;
                             bit_index <= 0;
                             state <= DATA;
                         else
                             baud_count <= baud_count + 1;
-                        end if;
+                        end if;                    
 
                     when DATA =>
                         if baud_count = BAUD_TICK_COUNT then
