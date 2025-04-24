@@ -1,72 +1,81 @@
--- File: uart_rx.vhd
 library IEEE;
-use IEEE.STD_LOGIC_1164.ALL;
-use IEEE.NUMERIC_STD.ALL;
+use IEEE.std_logic_1164.all;
 
 entity uart_rx is
-    generic (
-        CLKS_PER_BIT : integer := 868  -- adjust for your clock/baud
+    Port (
+        clk        : in  std_logic;
+        reset      : in  std_logic;
+        rx         : in  std_logic;
+        data_out   : out std_logic_vector(7 downto 0);
+        done       : out std_logic
     );
-    port(
-        i_Clock     : in  std_logic;                       -- 100 MHz system clock
-        i_Rx_Serial : in  std_logic;                       -- serial data in
-        o_Rx_Byte   : out std_logic_vector(7 downto 0) := (others => '0'); -- received byte
-        o_Rx_DV     : out std_logic                   := '0'  -- data-valid pulse
-    );
-end entity uart_rx;
+end uart_rx;
 
 architecture Behavioral of uart_rx is
+    constant CLOCK_FREQ      : integer := 100_000_000;  -- Basys 3 clock
+    constant BAUD_RATE       : integer := 115200;
+    constant BAUD_TICK_COUNT : integer := CLOCK_FREQ / BAUD_RATE;  -- ≈868
+
     type state_type is (IDLE, START, DATA, STOP);
-    signal state     : state_type := IDLE;
-    signal clk_cnt   : integer range 0 to CLKS_PER_BIT := 0;
-    signal bit_index : integer range 0 to 7           := 0;
-    signal rx_shift  : std_logic_vector(7 downto 0)   := (others => '0');
+    signal state      : state_type := IDLE;
+    signal baud_count : integer := 0;
+    signal bit_index  : integer := 0;
+    signal rx_shift   : std_logic_vector(7 downto 0) := (others => '0');
+    signal done_reg   : std_logic := '0';
 begin
-    process(i_Clock)
+    done <= done_reg;
+
+    process(clk)
     begin
-        if rising_edge(i_Clock) then
-            case state is
-                when IDLE =>
-                    o_Rx_DV   <= '0';
-                    clk_cnt   <= 0;
-                    bit_index <= 0;
-                    if i_Rx_Serial = '0' then       -- start bit detected
-                        state <= START;
-                    end if;
-
-                when START =>
-                    -- wait half a bit period to sample in center of start bit
-                    if clk_cnt = (CLKS_PER_BIT/2 - 1) then
-                        clk_cnt <= 0;
-                        state   <= DATA;
-                    else
-                        clk_cnt <= clk_cnt + 1;
-                    end if;
-
-                when DATA =>
-                    if clk_cnt < CLKS_PER_BIT-1 then
-                        clk_cnt <= clk_cnt + 1;
-                    else
-                        clk_cnt               <= 0;
-                        rx_shift(bit_index)   <= i_Rx_Serial;
-                        if bit_index < 7 then
-                            bit_index <= bit_index + 1;
-                        else
-                            state     <= STOP;
+        if rising_edge(clk) then
+            done_reg <= '0';  -- Default done signal to 0 each clock
+            if reset = '1' then
+                state <= IDLE;
+                baud_count <= 0;
+                bit_index <= 0;
+                rx_shift <= (others => '0');
+                done_reg <= '0';
+            else
+                case state is
+                    when IDLE =>
+                        if rx = '0' then
+                            state <= START;
+                            baud_count <= 0;
                         end if;
-                    end if;
 
-                when STOP =>
-                    -- wait one bit to finish stop bit
-                    if clk_cnt < CLKS_PER_BIT-1 then
-                        clk_cnt <= clk_cnt + 1;
-                    else
-                        o_Rx_Byte <= rx_shift; -- latch received byte
-                        o_Rx_DV   <= '1';      -- pulse data-valid
-                        clk_cnt   <= 0;
-                        state     <= IDLE;
-                    end if;
-            end case;
+                        when START =>
+                        if baud_count = BAUD_TICK_COUNT / 2 then
+                            baud_count <= 0;
+                            bit_index <= 0;
+                            state <= DATA;
+                        else
+                            baud_count <= baud_count + 1;
+                        end if;                    
+
+                    when DATA =>
+                        if baud_count = BAUD_TICK_COUNT then
+                            baud_count <= 0;
+                            rx_shift(bit_index) <= rx;
+                            if bit_index = 7 then
+                                state <= STOP;
+                            else
+                                bit_index <= bit_index + 1;
+                            end if;
+                        else
+                            baud_count <= baud_count + 1;
+                        end if;
+
+                    when STOP =>
+                        if baud_count = BAUD_TICK_COUNT then
+                            baud_count <= 0;
+                            data_out <= rx_shift;
+                            done_reg <= '1';
+                            state <= IDLE;
+                        else
+                            baud_count <= baud_count + 1;
+                        end if;
+                end case;
+            end if;
         end if;
     end process;
-end architecture Behavioral;
+end Behavioral;
