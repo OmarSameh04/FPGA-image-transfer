@@ -13,7 +13,7 @@ end uart_rx;
 
 architecture Behavioral of uart_rx is
     constant CLOCK_FREQ      : integer := 100000000;  -- Basys 3 clock
-    constant BAUD_RATE       : integer := 115200;
+    constant BAUD_RATE       : integer := 115200; --baud rate
     constant BAUD_TICK_COUNT : integer := CLOCK_FREQ / BAUD_RATE;  -- ≈868
 
     type state_type is (IDLE, START, DATA, STOP);
