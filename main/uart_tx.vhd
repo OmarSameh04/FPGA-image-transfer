@@ -3,8 +3,8 @@ library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
 
--- UART transmitter with manual data input via switches and start via button.
--- Set 8-bit data on SW[7:0], press BTN0 to load and send.
+-- UART transmitter to send switch bits as ASCII '0'/'1'.
+-- Set SW7..SW0, press BTN0 to send binary string SW7..SW0.
 
 entity uart_tx is
     port(
@@ -19,67 +19,89 @@ end entity uart_tx;
 architecture Behavioral of uart_tx is
     constant CLOCK_FREQ      : integer := 100_000_000;
     constant BAUD_RATE       : integer := 115200;
-    constant BAUD_TICK_COUNT : integer := CLOCK_FREQ / BAUD_RATE;  -- ? 868
+    constant TICKS_PER_BIT   : integer := CLOCK_FREQ / BAUD_RATE;  -- ? 868
 
     type state_type is (IDLE, START, DATA, STOP);
     signal state         : state_type := IDLE;
-    signal baud_counter  : integer range 0 to BAUD_TICK_COUNT := 0;
-    signal bit_index     : integer range 0 to 7 := 0;
+    signal baud_counter  : integer range 0 to TICKS_PER_BIT := 0;
+    signal bit_index     : integer range 0 to 7 := 0;              -- for shift_reg bits
+    signal data_index    : integer range 0 to 7 := 0;              -- which switch bit
     signal shift_reg     : std_logic_vector(7 downto 0) := (others => '0');
-    signal tx_reg        : std_logic := '1';
     signal start_prev    : std_logic := '0';
+    signal tx_reg        : std_logic := '1';
 begin
     tx <= tx_reg;
 
     process(clk)
     begin
         if rising_edge(clk) then
+            start_prev <= start_btn;
             if reset = '1' then
+                -- reset all
                 state        <= IDLE;
                 baud_counter <= 0;
                 bit_index    <= 0;
+                data_index   <= 0;
                 shift_reg    <= (others => '0');
                 tx_reg       <= '1';
-                start_prev   <= '0';
-
             else
-                -- detect rising edge of start_btn
-                start_prev <= start_btn;
-
                 case state is
                     when IDLE =>
-                        tx_reg <= '1';
-                        -- on button press, load data and start
+                        tx_reg <= '1';  -- idle
+                        -- on rising edge of start_btn: load first bit
                         if (start_btn = '1' and start_prev = '0') then
-                            shift_reg    <= data_in;
+                            data_index <= 7;
+                            -- load ASCII '0' or '1'
+                            if data_in(7) = '1' then
+                                shift_reg <= x"31";  -- '1'
+                            else
+                                shift_reg <= x"30";  -- '0'
+                            end if;
                             baud_counter <= 0;
                             bit_index    <= 0;
-                            tx_reg       <= '0';  -- start bit
+                            state        <= START;
+                        end if;
+
+                    when START =>
+                        tx_reg <= '0';  -- start bit
+                        if baud_counter = TICKS_PER_BIT - 1 then
+                            baud_counter <= 0;
                             state        <= DATA;
+                        else
+                            baud_counter <= baud_counter + 1;
                         end if;
 
                     when DATA =>
-                        -- send data bits LSB first
-                        if baud_counter = BAUD_TICK_COUNT-1 then
+                        tx_reg <= shift_reg(bit_index);
+                        if baud_counter = TICKS_PER_BIT - 1 then
                             baud_counter <= 0;
-                            if bit_index < 7 then
-                                bit_index <= bit_index + 1;
-                                tx_reg    <= shift_reg(bit_index);
+                            if bit_index = 7 then
+                                state <= STOP;
                             else
-                                -- all data bits done, go to STOP
-                                state     <= STOP;
-                                tx_reg    <= '1';  -- stop bit
-                                bit_index <= 0;
+                                bit_index <= bit_index + 1;
                             end if;
                         else
                             baud_counter <= baud_counter + 1;
                         end if;
 
                     when STOP =>
-                        -- hold stop bit for one bit period
-                        if baud_counter = BAUD_TICK_COUNT-1 then
+                        tx_reg <= '1';  -- stop bit
+                        if baud_counter = TICKS_PER_BIT - 1 then
                             baud_counter <= 0;
-                            state        <= IDLE;
+                            -- prepare next bit or finish
+                            if data_index > 0 then
+                                data_index <= data_index - 1;
+                                bit_index  <= 0;
+                                -- load next ASCII char
+                                if data_in(data_index-1) = '1' then
+                                    shift_reg <= x"31";
+                                else
+                                    shift_reg <= x"30";
+                                end if;
+                                state <= START;
+                            else
+                                state <= IDLE;
+                            end if;
                         else
                             baud_counter <= baud_counter + 1;
                         end if;
@@ -92,11 +114,9 @@ begin
     end process;
 end architecture Behavioral;
 
--- Constraints example (Basys3 rev C):
--- Map tx to USB-UART RXD (FPGA pin A18)
+-- Constraints (Basys3 rev C):
 -- set_property PACKAGE_PIN A18 [get_ports tx]
 -- set_property IOSTANDARD LVCMOS33 [get_ports tx]
--- Map switches SW7..SW0 (FPGA pins C4,D4,C3,D3,C2,D2,C1,D1)
 -- set_property PACKAGE_PIN C4  [get_ports {data_in(7)}]
 -- set_property PACKAGE_PIN D4  [get_ports {data_in(6)}]
 -- set_property PACKAGE_PIN C3  [get_ports {data_in(5)}]
@@ -105,8 +125,7 @@ end architecture Behavioral;
 -- set_property PACKAGE_PIN D2  [get_ports {data_in(2)}]
 -- set_property PACKAGE_PIN C1  [get_ports {data_in(1)}]
 -- set_property PACKAGE_PIN D1  [get_ports {data_in(0)}]
--- Map start button BTN0 to start_btn
 -- set_property PACKAGE_PIN W4  [get_ports start_btn]
--- set_property IOSTANDARD LVCMOS33 [get_ports {start_btn, reset}]
--- Map BTN1 to reset
 -- set_property PACKAGE_PIN U18 [get_ports reset]
+-- set_property IOSTANDARD LVCMOS33 [get_ports {start_btn, reset}]
+

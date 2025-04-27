@@ -8,7 +8,7 @@ entity uart_rx is
         rx         : in  std_logic;
         data_out   : out std_logic_vector(7 downto 0);
         done       : out std_logic
-    );
+    );--meow
 end uart_rx;
 
 architecture Behavioral of uart_rx is
